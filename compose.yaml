@@ -1,0 +1,25 @@
+services:
+  bot:
+    build:
+      context: .
+      args:
+        DOCKER_IMAGE: ${DOCKER_IMAGE:-ubuntu}
+      platforms:
+        - linux/amd64
+        - linux/arm64
+    image: cli_discord_bot2
+    container_name: cli_discord_bot2
+    environment:
+      - ATTACHMENT_EXTENSION_TO_TREAT_AS_INPUT
+      - DISCORD_NICKNAME
+      - DISCORD_PLAYING
+      - DISCORD_TOKEN
+      - ENV_COMMAND #=/usr/bin/env -i
+      - NUMBER_OF_LINES_TO_EMBED_OUTPUT #=20
+      - NUMBER_OF_LINES_TO_EMBED_UPLOADED_OUTPUT #=3
+      - REST_TIMEOUT_SECONDS #=10
+      - TARGET_ARGS_TO_USE_STDIN
+      - TARGET_CLI #=cat
+      - TARGET_DEFAULT_ARGS
+      - TIMEOUT_SECONDS #=30
+    tty: true
