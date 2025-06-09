@@ -1,0 +1,162 @@
+name: build image
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  REGISTRY_IMAGE: ghcr.io/${{ github.repository }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # For non-Homebrew we have to support an old release of Go
+        go-version: ["1.23.x", "1.24.x"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+      - run: go install github.com/google/go-licenses@latest
+      - run: go-licenses check ./...
+      - run: go test -v ./...
+      - run: CGO_ENABLED=0 go build .
+
+  parse-docker-compose:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      build-args: ${{ steps.parse.outputs.build-args }}
+      platforms: ${{ steps.parse.outputs.platforms }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: parse
+        run: |
+          build_args=$(yq eval '.services.bot.build.args|to_entries[]|"\(.key)=\(.value)"' compose.yaml)
+          delimiter="$(openssl rand -hex 8)"
+          echo "build-args<<${delimiter}" >> $GITHUB_OUTPUT
+          echo "${build_args}" >> $GITHUB_OUTPUT
+          echo "${delimiter}" >> $GITHUB_OUTPUT
+          platforms=$(yq -o json '.services.bot.build.platforms' compose.yaml | jq -c)
+          echo "platforms=${platforms}" >> $GITHUB_OUTPUT
+
+  build:
+    needs: parse-docker-compose
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJSON(needs.parse-docker-compose.outputs.platforms) }}
+    runs-on: ${{ endsWith(matrix.platform, 'arm64') && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - id: cache-param
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            ref=${GITHUB_BASE_REF/\//-}
+          else
+            ref=${GITHUB_REF_NAME/\//-}
+          fi
+          cache_param="type=gha,scope=${ref}-$(dpkg --print-architecture)"
+          echo "cache-from=${cache_param}" >> $GITHUB_OUTPUT
+          echo "cache-to=${cache_param},mode=max" >> $GITHUB_OUTPUT
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_IMAGE }}
+
+      - name: Login to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          build-args: ${{ needs.parse-docker-compose.outputs.build-args }}
+          cache-from: ${{ steps.cache-param.outputs.cache-from }}
+          cache-to: ${{ steps.cache-param.outputs.cache-to }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          platforms: ${{ matrix.platform }}
+          secrets: |
+            "github_token=${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Export digest
+        run: |
+          mkdir -p ${{ runner.temp }}/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ runner.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name }}
+    needs:
+      - build
+    steps:
+      - name: Download digest
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Login to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_IMAGE }}
+          flavor: |
+            latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,prefix=pr-,suffix=,event=pr
+
+      - name: Create manifest list and push
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
