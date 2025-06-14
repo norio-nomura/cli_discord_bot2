@@ -125,7 +125,7 @@ func executeTarget(
 		previewLinesForUploaded := o.NumberOfLinesToEmbedUploadedOutput
 		for i, out := range outputs {
 			header := "```\n"
-			if i == 0 {
+			if i == 0 && err != nil {
 				header = out.Name + ":" + header
 			}
 			footer := "```"
