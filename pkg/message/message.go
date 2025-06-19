@@ -85,14 +85,17 @@ func ExecuteCmds(ctx context.Context, o *options.Options, e *events.GenericMessa
 	// Prepare the commands for execution, deduplicating them.
 	seqCmds := xiter.Dedupe(slices.Values(cmds))
 	executeCmdFunc := func(cmd string) future.Future[*ExecutionResult] {
-		// If the command is empty and no input is provided, return a help message.
-		if input == nil && strings.TrimSpace(cmd) == "" {
+		var reader io.Reader
+		if input != nil {
+			reader = bytes.NewReader(input)
+		} else if strings.TrimSpace(cmd) == "" {
+			// If the command is empty and no input is provided, return a help message.
 			return future.NewDeferred(func(_ context.Context) (*ExecutionResult, error) {
 				return helpResult(e)
 			})
 		}
 		return future.New(ctx, func(ctx context.Context) (*ExecutionResult, error) {
-			return executeTarget(ctx, o, cmd, bytes.NewReader(input), outputCmd)
+			return executeTarget(ctx, o, cmd, reader, outputCmd)
 		})
 	}
 	return xiter.Map(seqCmds, executeCmdFunc)
