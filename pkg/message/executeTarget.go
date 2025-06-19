@@ -131,7 +131,9 @@ func executeTarget(
 			footer := "```"
 			limit := contentMax - utf8.RuneCountInString(content) - utf8.RuneCountInString(header) - utf8.RuneCountInString(footer)
 			embed, reader := bytesToEmbedAndReader(out.Output.Bytes(), maxLinesToEmbed, limit, previewLinesForUploaded)
-			content += header + embed + footer
+			if len(embed) != 0 {
+				content += header + embed + footer
+			}
 			if reader != nil {
 				files = append(files, &discord.File{
 					Name:   out.Name + ".log",
@@ -169,6 +171,10 @@ func executeTarget(
 // bytesToEmbedAndReader splits the byte slice into a string for embedding and a reader for uploading as a file.
 // It limits the number of lines and runes in the embed, and provides a preview if the output is too large.
 func bytesToEmbedAndReader(b []byte, maxLines, maxRunes, previewLines int) (string, *bytes.Reader) {
+	if maxRunes <= 0 {
+		return "", bytes.NewReader(b)
+	}
+
 	lineNumber := 0
 	runeCount := 0
 	embedEnd := 0
