@@ -62,16 +62,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - id: cache-param
+      - name: Build cache param
+        id: cache-param
         run: |
           if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
             ref=${GITHUB_BASE_REF/\//-}
           else
             ref=${GITHUB_REF_NAME/\//-}
           fi
-          cache_param="type=gha,scope=${ref}-$(dpkg --print-architecture)"
+          targetarch="$(dpkg --print-architecture)"
+          cache_param="type=gha,scope=${ref}-${targetarch}"
           echo "cache-from=${cache_param}" >> $GITHUB_OUTPUT
           echo "cache-to=${cache_param},mode=max" >> $GITHUB_OUTPUT
+          echo "targetarch=${targetarch}" >> $GITHUB_OUTPUT
 
       - name: Docker meta
         id: meta
@@ -87,7 +90,44 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
+        id: setup-buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Cache
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            go-pkg-mod
+            root-cache
+            var-cache-apt
+            var-lib-apt
+          key: cache-${{ steps.cache-param.outputs.targetarch }}-${{ hashFiles('Dockerfile') }}
+
+      - name: Inject cache into docker
+        uses: reproducible-containers/buildkit-cache-dance@v3
+        with:
+          builder: ${{ steps.setup-buildx.outputs.name }}
+          cache-map: |
+            {
+              "go-pkg-mod": {
+                "target": "/go/pkg/mod",
+                "id": "go-pkg-mod-${{ steps.cache-param.outputs.targetarch }}"
+              },
+              "root-cache": {
+                "target": "/root/.cache",
+                "id": "root-cache-${{ steps.cache-param.outputs.targetarch }}"
+              },
+              "var-cache-apt": {
+                "target": "/var/cache/apt",
+                "id": "var-cache-apt-${{ steps.cache-param.outputs.targetarch }}"
+              },
+              "var-lib-apt": {
+                "target": "/var/lib/apt",
+                "id": "var-lib-apt-${{ steps.cache-param.outputs.targetarch }}"
+              }
+            }
+          skip-extraction: ${{ steps.cache.outputs.cache-hit }}
 
       - name: Build and push digest
         id: build
