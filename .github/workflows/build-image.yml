@@ -46,7 +46,7 @@ jobs:
           build_args=$(yq eval '.services.bot.build.args|to_entries[]|"\(.key)=\(.value)"' compose.yaml)
           delimiter="$(openssl rand -hex 8)"
           echo "build-args<<${delimiter}" >> $GITHUB_OUTPUT
-          echo "${build_args}" >> $GITHUB_OUTPUT
+          eval "echo \"${build_args}\"" >> $GITHUB_OUTPUT
           echo "${delimiter}" >> $GITHUB_OUTPUT
           platforms=$(yq -o json '.services.bot.build.platforms' compose.yaml | jq -c)
           echo "platforms=${platforms}" >> $GITHUB_OUTPUT
