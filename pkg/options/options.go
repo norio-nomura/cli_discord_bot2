@@ -22,7 +22,8 @@ type Options struct {
 	AttachmentExtensionToTreatAsInput  string   `env:"ATTACHMENT_EXTENSION_TO_TREAT_AS_INPUT" json:","`
 	DiscordNickname                    string   `env:"DISCORD_NICKNAME" json:",omitempty"`
 	DiscordPlaying                     string   `env:"DISCORD_PLAYING" json:",omitempty"`
-	DiscordToken                       string   `env:"DISCORD_TOKEN" json:","`
+	DiscordToken                       string   `env:"DISCORD_TOKEN" json:",omitempty"`
+	DiscordTokens                      []string `env:"DISCORD_TOKENS" json:","`
 	EnvCommand                         []string `env:"ENV_COMMAND" json:","`
 	NumberOfLinesToEmbedOutput         int      `env:"NUMBER_OF_LINES_TO_EMBED_OUTPUT" json:","`
 	NumberOfLinesToEmbedUploadedOutput int      `env:"NUMBER_OF_LINES_TO_EMBED_UPLOADED_OUTPUT" json:","`
@@ -95,9 +96,8 @@ func FromEnv() (*Options, error) {
 		}
 	}
 
-	// Ensure required fields are set
-	if options.DiscordToken == "" {
-		return nil, errors.New("`DISCORD_TOKEN` is missing in environment variables")
+	if err := options.EnsureDiscordTokens(); err != nil {
+		return nil, err
 	}
 
 	// pass PATH="..." to EnvCommand if not set
@@ -117,11 +117,21 @@ func FromStdin() (*Options, error) {
 		return nil, fmt.Errorf("failed to decode JSON: %w", err)
 	}
 
-	// Ensure required fields are set
-	if options.DiscordToken == "" {
-		return nil, errors.New("`DISCORD_TOKEN` is missing in JSON")
+	if err := options.EnsureDiscordTokens(); err != nil {
+		return nil, err
 	}
 	return options, nil
+}
+
+// EnsureDiscordTokens checks if the DiscordToken is set and adds it to DiscordTokens if not already present.
+func (o *Options) EnsureDiscordTokens() error {
+	if o.DiscordToken != "" && !slices.Contains(o.DiscordTokens, o.DiscordToken) {
+		o.DiscordTokens = slices.Insert(o.DiscordTokens, 0, o.DiscordToken)
+	}
+	if len(o.DiscordTokens) == 0 {
+		return errors.New("`DISCORD_TOKEN` or `DISCORD_TOKENS` is required")
+	}
+	return nil
 }
 
 // Discord returns the Discord nickname and playing status from the options.

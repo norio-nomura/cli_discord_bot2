@@ -15,7 +15,7 @@ import (
 // It registers all necessary event listeners for message and ready events.
 func New(o *options.Options) (bot.Client, error) {
 	handler := messageEventsHandler{options: o}
-	return disgo.New(o.DiscordToken,
+	return disgo.New(o.DiscordTokens[0],
 		bot.WithEventListeners(
 			bot.NewListenerFunc(func(e *events.Ready) { onReady(o, e) }),
 			bot.NewListenerFunc(handler.onMessageCreate),
